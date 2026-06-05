@@ -5,37 +5,31 @@ import { logger } from "../lib/logger.js";
 import {
   mainMenuKeyboard,
   cancelKeyboard,
-  dealRoleKeyboard,
   currencyKeyboard,
-  dealConfirmKeyboard,
-  dealActionKeyboard,
-  walletKeyboard,
+  dealPageKeyboard,
+  sellerDealKeyboard,
 } from "./keyboards.js";
 import {
   upsertUser,
   getWallet,
+  addToWallet,
+  deductFromWallet,
   createDeal,
   getDealByCode,
   updateDealStatus,
-  getUserDeals,
   getUserStats,
-  getWalletHistory,
 } from "./db.js";
 import {
-  generateDealCode,
   formatCurrency,
-  currencyLabel,
   parseCurrencyFromButton,
   statusLabel,
-  displayName,
 } from "./utils.js";
 
 interface BotContext extends Context {
   session: SessionData;
 }
 
-const SUPPORT_USERNAME = "@nft_garant_support";
-const TOTAL_DEALS_DISPLAY = "11 742";
+const MANAGER = "@GarantTGifts";
 
 export function createBot() {
   const token = process.env["TELEGRAM_BOT_TOKEN"];
@@ -45,9 +39,11 @@ export function createBot() {
   }
 
   const bot = new Telegraf<BotContext>(token);
-
   bot.use(session({ defaultSession: (): SessionData => ({}) }));
 
+  // ──────────────────────────────────────────
+  // /start
+  // ──────────────────────────────────────────
   bot.start(async (ctx) => {
     await upsertUser(ctx.from.id, {
       username: ctx.from.username,
@@ -58,7 +54,7 @@ export function createBot() {
     const startParam = ctx.startPayload;
     if (startParam && startParam.startsWith("deal_")) {
       const dealCode = startParam.replace("deal_", "");
-      await handleJoinDeal(ctx, dealCode);
+      await handleDealPage(ctx, dealCode);
       return;
     }
 
@@ -74,20 +70,99 @@ export function createBot() {
         `🔹 Кошелёк с несколькими валютами (ГРН, РУБ, TON, Звёзды)\n` +
         `🔹 Уведомления продавцу и покупателю в реальном времени\n` +
         `🔹 Поддержка 24/7 — ответ до 5 минут\n` +
-        `🔹 ${TOTAL_DEALS_DISPLAY} успешных сделок без единого обмана\n\n` +
+        `🔹 11 742 успешных сделок без единого обмана\n\n` +
         `📌 Выберите раздел кнопками снизу`,
       { parse_mode: "Markdown", ...mainMenuKeyboard }
     );
   });
 
-  bot.hears("Создать сделку 🤝", async (ctx) => {
-    ctx.session = { step: "deal_role", dealDraft: {} };
+  // ──────────────────────────────────────────
+  // /add <telegramId> <amount> <currency>  — пополнение баланса
+  // ──────────────────────────────────────────
+  bot.command("add", async (ctx) => {
+    const text = ctx.message.text.trim();
+    const parts = text.split(/\s+/);
+    if (parts.length !== 4) {
+      await ctx.reply("❌ Формат: /add <ID> <сумма> <валюта>\nПример: /add 123456789 1250 Руб");
+      return;
+    }
+
+    const targetId = parseInt(parts[1]!);
+    const amount = parseFloat(parts[2]!.replace(",", "."));
+    const rawCurrency = parts[3]!.toLowerCase();
+
+    if (isNaN(targetId) || isNaN(amount) || amount <= 0) {
+      await ctx.reply("❌ Некорректный ID или сумма.");
+      return;
+    }
+
+    let currency: string;
+    if (rawCurrency === "грн" || rawCurrency === "uah") currency = "UAH";
+    else if (rawCurrency === "руб" || rawCurrency === "rub") currency = "RUB";
+    else if (rawCurrency === "ton") currency = "TON";
+    else if (rawCurrency === "stars" || rawCurrency === "звёзды" || rawCurrency === "звезды") currency = "STARS";
+    else {
+      await ctx.reply("❌ Неизвестная валюта. Допустимые: Грн, Руб, TON, Stars");
+      return;
+    }
+
+    await upsertUser(targetId, {});
+    await addToWallet(targetId, currency, amount, `Пополнение администратором (от ${ctx.from.id})`);
+    const wallet = await getWallet(targetId);
+
     await ctx.reply(
-      `🤝 *Создание новой сделки*\n\nКем вы выступаете в сделке?`,
-      { parse_mode: "Markdown", ...dealRoleKeyboard }
+      `✅ Баланс пользователя \`${targetId}\` пополнен на *${formatCurrency(amount, currency)}*\n\n` +
+        `💼 Текущий баланс:\n` +
+        `▪️ ${parseFloat(wallet.uah).toFixed(2)} ГРН\n` +
+        `▪️ ${parseFloat(wallet.rub).toFixed(2)} РУБ\n` +
+        `▪️ ${parseFloat(wallet.ton).toFixed(6)} TON\n` +
+        `▪️ ${Math.round(parseFloat(wallet.stars))} Звёзды`,
+      { parse_mode: "Markdown", ...mainMenuKeyboard }
+    );
+
+    try {
+      await bot.telegram.sendMessage(
+        targetId,
+        `💸 *Ваш баланс пополнен!*\n\n` +
+          `Зачислено: *${formatCurrency(amount, currency)}*\n\n` +
+          `💼 Текущий баланс:\n` +
+          `▪️ ${parseFloat(wallet.uah).toFixed(2)} ГРН\n` +
+          `▪️ ${parseFloat(wallet.rub).toFixed(2)} РУБ\n` +
+          `▪️ ${parseFloat(wallet.ton).toFixed(6)} TON\n` +
+          `▪️ ${Math.round(parseFloat(wallet.stars))} Звёзды`,
+        { parse_mode: "Markdown" }
+      );
+    } catch {
+      // пользователь мог не запустить бота
+    }
+  });
+
+  // ──────────────────────────────────────────
+  // Создать сделку 🤝 — Шаг 1
+  // ──────────────────────────────────────────
+  bot.hears("Создать сделку 🤝", async (ctx) => {
+    await upsertUser(ctx.from.id, {
+      username: ctx.from.username,
+      firstName: ctx.from.first_name,
+    });
+    ctx.session = { step: "deal_description", dealDraft: {} };
+    await ctx.reply(
+      `🤝 *Создание сделки — Шаг 1 из 3*\n\n` +
+        `📦 Введите название товара или услуги:\n\n` +
+        `✅ Примеры:\n` +
+        `• Скин AK-47 Redline MW CS2\n` +
+        `• NFT Notcoin #4821\n` +
+        `• Подарок Telegram 500 Stars\n` +
+        `• Аккаунт Steam MMR 4500\n` +
+        `• Игровая валюта 10 000 золота\n\n` +
+        `✏️ Напишите название в следующем сообщении:`,
+      { parse_mode: "Markdown", ...cancelKeyboard }
     );
   });
 
+  // ──────────────────────────────────────────
+  // Кошелек 💼
+  // ──────────────────────────────────────────
   bot.hears("Кошелек 💼", async (ctx) => {
     await upsertUser(ctx.from.id, {
       username: ctx.from.username,
@@ -96,248 +171,272 @@ export function createBot() {
     const wallet = await getWallet(ctx.from.id);
     await ctx.reply(
       `💼 *Ваш кошелёк*\n\n` +
-        `💵 ГРН: *${parseFloat(wallet.uah).toFixed(2)}*\n` +
-        `💴 РУБ: *${parseFloat(wallet.rub).toFixed(2)}*\n` +
-        `💎 TON: *${parseFloat(wallet.ton).toFixed(4)}*\n` +
-        `⭐ Звёзды: *${Math.round(parseFloat(wallet.stars))}*\n\n` +
-        `_Для пополнения или вывода используйте кнопки ниже_`,
-      { parse_mode: "Markdown", ...walletKeyboard }
+        `🆔 Ваш ID для пополнения: \`${ctx.from.id}\`\n\n` +
+        `💵 Текущий баланс:\n` +
+        `▪️ ${parseFloat(wallet.uah).toFixed(2)} ГРН\n` +
+        `▪️ ${parseFloat(wallet.rub).toFixed(2)} РУБ\n` +
+        `▪️ ${parseFloat(wallet.ton).toFixed(6)} TON\n` +
+        `▪️ ${Math.round(parseFloat(wallet.stars))} Звёзды\n\n` +
+        `ℹ️ Баланс используется для оплаты сделок в боте.\n\n` +
+        `📩 Как пополнить баланс:\n` +
+        `1. Напишите ${MANAGER}\n` +
+        `2. Сообщите ваш ID: \`${ctx.from.id}\`\n` +
+        `3. Укажите нужную сумму и валюту\n` +
+        `4. Оплатите удобным способом\n\n` +
+        `⏱ Зачисление в течение 5-10 минут после подтверждения оплаты.`,
+      { parse_mode: "Markdown", ...mainMenuKeyboard }
     );
   });
 
+  // ──────────────────────────────────────────
+  // Моя статистика 📈
+  // ──────────────────────────────────────────
   bot.hears("Моя статистика 📈", async (ctx) => {
     await upsertUser(ctx.from.id, {
       username: ctx.from.username,
       firstName: ctx.from.first_name,
     });
-    const stats = await getUserStats(ctx.from.id);
-    const deals = await getUserDeals(ctx.from.id);
-
-    const lastDeals = deals.slice(0, 3);
-    let lastDealsText = "";
-    if (lastDeals.length > 0) {
-      lastDealsText = "\n\n📋 *Последние сделки:*\n";
-      for (const d of lastDeals) {
-        lastDealsText += `• #${d.dealCode} — ${formatCurrency(d.amount, d.currency)} — ${statusLabel(d.status)}\n`;
-      }
-    }
+    const [stats, wallet] = await Promise.all([
+      getUserStats(ctx.from.id),
+      getWallet(ctx.from.id),
+    ]);
 
     await ctx.reply(
-      `📈 *Ваша статистика*\n\n` +
-        `👤 Имя: *${displayName(ctx)}*\n` +
-        `🆔 ID: \`${ctx.from.id}\`\n\n` +
-        `📊 *Сделки:*\n` +
-        `• Всего: *${stats.total}*\n` +
-        `• Завершённых: *${stats.completed}*\n` +
-        `• Активных: *${stats.active}*\n` +
-        `• Отменённых: *${stats.cancelled}*${lastDealsText}`,
+      `📈 *Ваша личная статистика*\n\n` +
+        `🆔 Ваш ID: \`${ctx.from.id}\`\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `🤝 *Как продавец:*\n` +
+        `▪️ Создано сделок: ${stats.sellerTotal}\n` +
+        `▪️ Завершено: ${stats.sellerCompleted}\n` +
+        `▪️ Активных: ${stats.sellerActive}\n\n` +
+        `🛒 *Как покупатель:*\n` +
+        `▪️ Оплачено сделок: ${stats.buyerCompleted} из ${stats.buyerTotal}\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `💼 *Текущий баланс:*\n` +
+        `▪️ ${parseFloat(wallet.uah).toFixed(2)} ГРН\n` +
+        `▪️ ${parseFloat(wallet.rub).toFixed(2)} РУБ\n` +
+        `▪️ ${parseFloat(wallet.ton).toFixed(6)} TON\n` +
+        `▪️ ${Math.round(parseFloat(wallet.stars))} Звёзды\n\n` +
+        `📩 Для пополнения обратитесь в 🆘 Поддержку.`,
       { parse_mode: "Markdown", ...mainMenuKeyboard }
     );
   });
 
+  // ──────────────────────────────────────────
+  // Поддержка 🆘
+  // ──────────────────────────────────────────
   bot.hears("Поддержка 🆘", async (ctx) => {
     await ctx.reply(
-      `🆘 *Служба поддержки*\n\n` +
-        `Мы работаем 24/7 и отвечаем в течение 5 минут.\n\n` +
-        `📨 Написать оператору: ${SUPPORT_USERNAME}\n\n` +
-        `❓ *Частые вопросы:*\n` +
-        `• Как создать сделку? → нажмите «Создать сделку 🤝»\n` +
-        `• Как пригласить партнёра? → после создания сделки получите ссылку\n` +
-        `• Сколько стоит гарант? → комиссия 1% от суммы\n` +
-        `• Как вывести средства? → в разделе «Кошелек 💼»`,
+      `🆘 *Служба поддержки NFT Гарант Бота*\n\n` +
+        `👤 Официальный менеджер: ${MANAGER}\n\n` +
+        `⏱ Время ответа: до 5 минут\n\n` +
+        `📋 *Чем помогаем:*\n` +
+        `• Спорные ситуации между продавцом и покупателем\n` +
+        `• Пополнение баланса любой валютой\n` +
+        `• Возврат средств при отмене сделки\n` +
+        `• Технические неполадки\n` +
+        `• Консультация по безопасным сделкам\n\n` +
+        `⚠️ *Осторожно, мошенники!*\n` +
+        `Единственный официальный аккаунт — ${MANAGER}.\n` +
+        `Не отвечайте на сообщения от других аккаунтов с похожими именами.`,
       { parse_mode: "Markdown", ...mainMenuKeyboard }
     );
   });
 
+  // ──────────────────────────────────────────
+  // Инструкция 📄
+  // ──────────────────────────────────────────
+  bot.hears("Инструкция 📄", async (ctx) => {
+    await ctx.reply(
+      `📖 *Как создать безопасную сделку — пошагово*\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `*Шаг 1 — Продавец создаёт сделку:*\n` +
+        `Нажмите 🤝 Создать сделку и следуйте инструкциям. Вы введёте название товара, цену и валюту. Бот выдаст уникальную ссылку.\n\n` +
+        `*Шаг 2 — Покупатель переходит по ссылке:*\n` +
+        `Отправьте ссылку покупателю. Он открывает её в Telegram, видит все детали сделки и нажимает «Оплатить». Средства списываются с его баланса в боте.\n\n` +
+        `*Шаг 3 — Передача товара:*\n` +
+        `Продавец передаёт товар менеджеру ${MANAGER}. Менеджер проверяет товар и переводит деньги продавцу.\n\n` +
+        `━━━━━━━━━━━━━━━━━━━━\n` +
+        `✅ *Примеры успешных сделок:*\n` +
+        `• NFT Notcoin #4821 за 12 TON — закрыто за 8 минут\n` +
+        `• Скин AK-47 Redline MW CS2 за 3 200 руб — без споров\n` +
+        `• Подарок Telegram 500 Stars — мгновенная оплата\n` +
+        `• Аккаунт Steam с MMR 4500 — проверен и передан\n\n` +
+        `💡 *Важно:* Пополните баланс через поддержку перед первой сделкой. Для оплаты нужны средства на счёте в боте.`,
+      { parse_mode: "Markdown", ...mainMenuKeyboard }
+    );
+  });
+
+  // ──────────────────────────────────────────
+  // ❌ Отмена
+  // ──────────────────────────────────────────
   bot.hears("❌ Отмена", async (ctx) => {
     ctx.session = {};
     await ctx.reply("Действие отменено.", mainMenuKeyboard);
   });
 
-  bot.hears(["👤 Я продавец", "🛒 Я покупатель"], async (ctx) => {
-    if (ctx.session.step !== "deal_role") return;
-    const isSeller = ctx.message.text.includes("продавец");
-    ctx.session.dealDraft = {
-      ...ctx.session.dealDraft,
-      role: isSeller ? "seller" : "buyer",
-    };
-    ctx.session.step = "deal_description";
-    await ctx.reply(
-      `📝 *Описание сделки*\n\n` +
-        `Что именно передаётся? Напишите краткое описание товара/услуги:\n\n` +
-        `_Пример: NFT из коллекции BAYC #1234, скин AWP Dragon Lore FN, аккаунт Steam с играми_`,
-      { parse_mode: "Markdown", ...cancelKeyboard }
-    );
-  });
-
-  bot.hears(["💵 ГРН", "💴 РУБ", "💎 TON", "⭐ Звёзды"], async (ctx) => {
+  // ──────────────────────────────────────────
+  // Выбор валюты — Шаг 3
+  // ──────────────────────────────────────────
+  bot.hears(["⭐ Stars", "💎 TON", "💴 РУБ", "💵 ГРН"], async (ctx) => {
     if (ctx.session.step !== "deal_currency") return;
     const currency = parseCurrencyFromButton(ctx.message.text);
     if (!currency) return;
-    ctx.session.dealDraft = { ...ctx.session.dealDraft, currency };
-    ctx.session.step = "deal_confirm";
 
     const draft = ctx.session.dealDraft!;
-    const commission = parseFloat(draft.amount!) * 0.01;
-    const commissionText = formatCurrency(commission.toFixed(8), currency);
-
-    await ctx.reply(
-      `✅ *Подтвердите сделку*\n\n` +
-        `📦 Товар: *${draft.description}*\n` +
-        `💰 Сумма: *${formatCurrency(draft.amount!, currency)}*\n` +
-        `🏷️ Роль: *${draft.role === "seller" ? "Продавец" : "Покупатель"}*\n` +
-        `💳 Комиссия гаранта (1%): *${commissionText}*\n\n` +
-        `Нажмите «Подтвердить сделку» для создания`,
-      { parse_mode: "Markdown", ...dealConfirmKeyboard }
-    );
-  });
-
-  bot.hears("✅ Подтвердить сделку", async (ctx) => {
-    if (ctx.session.step !== "deal_confirm") return;
-    const draft = ctx.session.dealDraft!;
-    if (!draft.description || !draft.amount || !draft.currency) {
-      await ctx.reply("Ошибка: данные сделки неполные. Начните заново.", mainMenuKeyboard);
-      ctx.session = {};
-      return;
-    }
-
-    const dealCode = generateDealCode();
-    const isSeller = draft.role === "seller";
-
-    await createDeal({
-      dealCode,
-      sellerTelegramId: isSeller ? ctx.from.id : 0,
-      buyerTelegramId: isSeller ? undefined : ctx.from.id,
-      description: draft.description,
-      amount: draft.amount,
-      currency: draft.currency,
+    const deal = await createDeal({
+      sellerTelegramId: ctx.from.id,
+      description: draft.description!,
+      amount: draft.amount!,
+      currency,
     });
 
     ctx.session = {};
 
     const botInfo = await bot.telegram.getMe();
-    const dealLink = `https://t.me/${botInfo.username}?start=deal_${dealCode}`;
+    const dealLink = `https://t.me/${botInfo.username}?start=deal_${deal.dealCode}`;
 
     await ctx.reply(
-      `🎉 *Сделка создана!*\n\n` +
-        `🔑 Код сделки: \`${dealCode}\`\n` +
-        `📦 Товар: *${draft.description}*\n` +
-        `💰 Сумма: *${formatCurrency(draft.amount, draft.currency!)}*\n` +
-        `📌 Статус: ⏳ Ожидание второй стороны\n\n` +
-        `🔗 *Отправьте эту ссылку ${isSeller ? "покупателю" : "продавцу"}:*\n` +
+      `✅ *Сделка успешно создана!*\n\n` +
+        `📦 Товар: ${draft.description}\n` +
+        `💵 Цена: ${formatCurrency(draft.amount!, currency)}\n` +
+        `🆔 ID сделки: ${deal.dealCode}\n\n` +
+        `🔗 *Ссылка для покупателя:*\n` +
         `${dealLink}\n\n` +
-        `_Как только партнёр перейдёт по ссылке, вы оба получите уведомление_`,
+        `📋 *Что делать дальше:*\n` +
+        `1. Скопируйте ссылку выше\n` +
+        `2. Отправьте её покупателю\n` +
+        `3. Дождитесь уведомления об оплате\n` +
+        `4. Передайте товар ${MANAGER}\n\n` +
+        `⏳ Ссылка активна до момента оплаты.`,
       { parse_mode: "Markdown", ...mainMenuKeyboard }
     );
   });
 
-  bot.action(/^confirm_deal_(.+)$/, async (ctx) => {
-    const dealCode = ctx.match[1];
+  // ──────────────────────────────────────────
+  // Callback: Оплатить сделку
+  // ──────────────────────────────────────────
+  bot.action(/^pay_deal_(\d+)$/, async (ctx) => {
+    const dealCode = ctx.match[1]!;
     await ctx.answerCbQuery();
-    const deal = await getDealByCode(dealCode!);
+
+    const deal = await getDealByCode(dealCode);
     if (!deal) {
       await ctx.reply("❌ Сделка не найдена.");
       return;
     }
-    if (deal.status !== "active") {
+    if (deal.status !== "pending") {
       await ctx.reply(`Сделка уже имеет статус: ${statusLabel(deal.status)}`);
       return;
     }
+    if (deal.sellerTelegramId === ctx.from!.id) {
+      await ctx.reply("❌ Вы не можете оплатить собственную сделку.");
+      return;
+    }
 
-    await updateDealStatus(dealCode!, "completed");
+    const amount = parseFloat(deal.amount);
+    const result = await deductFromWallet(
+      ctx.from!.id,
+      deal.currency,
+      amount,
+      `Оплата сделки #${deal.dealCode} — ${deal.description}`
+    );
+
+    if (!result.success) {
+      await ctx.reply(
+        `❌ *Недостаточно средств*\n\n` +
+          `Для оплаты нужно: *${formatCurrency(deal.amount, deal.currency)}*\n\n` +
+          `Пополните баланс через ${MANAGER} и попробуйте снова.`,
+        { parse_mode: "Markdown" }
+      );
+      return;
+    }
+
+    await updateDealStatus(dealCode, "completed", ctx.from!.id);
 
     await ctx.reply(
-      `✅ *Сделка #${dealCode} завершена!*\n\n` +
-        `Спасибо за использование NFT Гарант Бот!\n` +
-        `Средства будут зачислены на кошелёк в течение нескольких минут.`,
+      `✅ *Оплата прошла успешно!*\n\n` +
+        `📦 Товар: ${deal.description}\n` +
+        `💵 Сумма: ${formatCurrency(deal.amount, deal.currency)}\n` +
+        `🆔 ID сделки: ${deal.dealCode}\n\n` +
+        `Ожидайте передачи товара. По вопросам: ${MANAGER}`,
       { parse_mode: "Markdown", ...mainMenuKeyboard }
     );
 
+    // Уведомляем продавца
     try {
-      const otherId = ctx.from!.id === deal.sellerTelegramId
-        ? deal.buyerTelegramId
-        : deal.sellerTelegramId;
-      if (otherId) {
-        await bot.telegram.sendMessage(
-          otherId,
-          `✅ *Сделка #${dealCode} подтверждена!*\n\nВаш партнёр подтвердил получение товара. Сделка завершена успешно.`,
-          { parse_mode: "Markdown" }
-        );
-      }
-    } catch {}
+      await bot.telegram.sendMessage(
+        deal.sellerTelegramId,
+        `💰 *Покупатель оплатил сделку #${deal.dealCode}!*\n\n` +
+          `📦 Товар: ${deal.description}\n` +
+          `💵 Сумма: ${formatCurrency(deal.amount, deal.currency)}\n\n` +
+          `📌 Передайте товар менеджеру ${MANAGER} для завершения сделки.`,
+        { parse_mode: "Markdown" }
+      );
+    } catch {
+      // продавец мог заблокировать бота
+    }
   });
 
-  bot.action(/^cancel_deal_(.+)$/, async (ctx) => {
-    const dealCode = ctx.match[1];
+  // ──────────────────────────────────────────
+  // Callback: Отменить сделку
+  // ──────────────────────────────────────────
+  bot.action(/^cancel_deal_(\d+)$/, async (ctx) => {
+    const dealCode = ctx.match[1]!;
     await ctx.answerCbQuery();
-    const deal = await getDealByCode(dealCode!);
+
+    const deal = await getDealByCode(dealCode);
     if (!deal) {
       await ctx.reply("❌ Сделка не найдена.");
       return;
     }
-
-    await updateDealStatus(dealCode!, "cancelled");
-    await ctx.reply(
-      `❌ *Сделка #${dealCode} отменена.*\n\nЕсли у вас возник спор, обратитесь в поддержку: ${SUPPORT_USERNAME}`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
-    );
-  });
-
-  bot.action("wallet_deposit", async (ctx) => {
-    await ctx.answerCbQuery();
-    await ctx.reply(
-      `💸 *Пополнение кошелька*\n\n` +
-        `Для пополнения обратитесь к оператору:\n${SUPPORT_USERNAME}\n\n` +
-        `Укажите:\n` +
-        `• Вашу валюту (ГРН/РУБ/TON/Звёзды)\n` +
-        `• Сумму пополнения\n` +
-        `• Ваш Telegram ID: \`${ctx.from?.id}\``,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
-    );
-  });
-
-  bot.action("wallet_withdraw", async (ctx) => {
-    await ctx.answerCbQuery();
-    await ctx.reply(
-      `💳 *Вывод средств*\n\n` +
-        `Для вывода средств обратитесь к оператору:\n${SUPPORT_USERNAME}\n\n` +
-        `Укажите:\n` +
-        `• Валюту вывода\n` +
-        `• Сумму\n` +
-        `• Реквизиты\n` +
-        `• Ваш Telegram ID: \`${ctx.from?.id}\``,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
-    );
-  });
-
-  bot.action("wallet_history", async (ctx) => {
-    await ctx.answerCbQuery();
-    const history = await getWalletHistory(ctx.from!.id);
-    if (history.length === 0) {
-      await ctx.reply("📋 История транзакций пуста.", mainMenuKeyboard);
+    if (deal.status === "completed" || deal.status === "cancelled") {
+      await ctx.reply(`Сделка уже ${statusLabel(deal.status).toLowerCase()}.`);
       return;
     }
-    let text = "📋 *История транзакций:*\n\n";
-    for (const tx of history) {
-      const sign = tx.type === "credit" ? "+" : "-";
-      text += `${sign}${formatCurrency(tx.amount, tx.currency)} — ${tx.description ?? tx.type}\n`;
+
+    await updateDealStatus(dealCode, "cancelled");
+
+    await ctx.reply(
+      `❌ *Сделка #${dealCode} отменена.*\n\nЕсли у вас возникли вопросы, обратитесь: ${MANAGER}`,
+      { parse_mode: "Markdown", ...mainMenuKeyboard }
+    );
+
+    // Уведомляем продавца если отменяет покупатель
+    if (ctx.from!.id !== deal.sellerTelegramId) {
+      try {
+        await bot.telegram.sendMessage(
+          deal.sellerTelegramId,
+          `❌ *Сделка #${dealCode} была отменена покупателем.*\n\nЕсли есть вопросы: ${MANAGER}`,
+          { parse_mode: "Markdown" }
+        );
+      } catch {}
     }
-    await ctx.reply(text, { parse_mode: "Markdown", ...mainMenuKeyboard });
   });
 
+  // ──────────────────────────────────────────
+  // Текстовые сообщения — шаги создания сделки
+  // ──────────────────────────────────────────
   bot.on("text", async (ctx) => {
     const step = ctx.session.step;
     const text = ctx.message.text;
 
     if (step === "deal_description") {
-      if (text.length < 5) {
-        await ctx.reply("Описание слишком короткое. Напишите подробнее:", cancelKeyboard);
+      if (text.length < 3) {
+        await ctx.reply("❌ Название слишком короткое. Напишите подробнее:", cancelKeyboard);
         return;
       }
-      ctx.session.dealDraft = { ...ctx.session.dealDraft, description: text };
+      ctx.session.dealDraft = { description: text };
       ctx.session.step = "deal_amount";
       await ctx.reply(
-        `💰 *Сумма сделки*\n\nВведите сумму числом (например: \`500\`, \`0.5\`, \`1000\`):`,
+        `✅ Название сохранено: *${text}*\n\n` +
+          `💰 *Шаг 2 из 3 — Введите цену:*\n\n` +
+          `✅ Примеры:\n` +
+          `• 500 — целое число\n` +
+          `• 1250 — тысячи\n` +
+          `• 12.5 — дробное число\n` +
+          `• 0.05 — малые суммы (например TON)\n\n` +
+          `✏️ Напишите цену в следующем сообщении:`,
         { parse_mode: "Markdown", ...cancelKeyboard }
       );
       return;
@@ -346,30 +445,32 @@ export function createBot() {
     if (step === "deal_amount") {
       const amount = parseFloat(text.replace(",", "."));
       if (isNaN(amount) || amount <= 0) {
-        await ctx.reply("❌ Введите корректную сумму (только число):", cancelKeyboard);
+        await ctx.reply("❌ Введите корректную цену (только число):", cancelKeyboard);
         return;
       }
       ctx.session.dealDraft = { ...ctx.session.dealDraft, amount: amount.toString() };
       ctx.session.step = "deal_currency";
       await ctx.reply(
-        `💱 *Выберите валюту сделки:*`,
+        `✅ Цена сохранена: *${amount}*\n\n` +
+          `💱 *Шаг 3 из 3 — Выберите валюту:*\n\n` +
+          `Нажмите на нужную валюту ниже 👇`,
         { parse_mode: "Markdown", ...currencyKeyboard }
       );
       return;
     }
 
     if (!step) {
-      await ctx.reply(
-        "Выберите действие из меню ниже 👇",
-        mainMenuKeyboard
-      );
+      await ctx.reply("Выберите действие из меню ниже 👇", mainMenuKeyboard);
     }
   });
 
   return bot;
 }
 
-async function handleJoinDeal(ctx: BotContext, dealCode: string) {
+// ──────────────────────────────────────────
+// Страница сделки для покупателя
+// ──────────────────────────────────────────
+async function handleDealPage(ctx: BotContext, dealCode: string) {
   const deal = await getDealByCode(dealCode);
   if (!deal) {
     await ctx.reply("❌ Сделка не найдена. Проверьте ссылку.", mainMenuKeyboard);
@@ -377,48 +478,35 @@ async function handleJoinDeal(ctx: BotContext, dealCode: string) {
   }
 
   const userId = ctx.from!.id;
-  const isSeller = deal.sellerTelegramId === userId;
-  const isBuyer = deal.buyerTelegramId === userId;
 
-  if (deal.status !== "pending" && !isSeller && !isBuyer) {
-    await ctx.reply(`Сделка #${dealCode} уже ${statusLabel(deal.status).toLowerCase()}.`, mainMenuKeyboard);
-    return;
-  }
-
-  if (isSeller || isBuyer) {
+  // Это продавец — показываем его сделку
+  if (deal.sellerTelegramId === userId) {
     await ctx.reply(
-      `🤝 *Сделка #${dealCode}*\n\n` +
-        `📦 Товар: *${deal.description}*\n` +
-        `💰 Сумма: *${formatCurrency(deal.amount, deal.currency)}*\n` +
-        `📌 Статус: ${statusLabel(deal.status)}`,
-      { parse_mode: "Markdown", ...dealActionKeyboard(dealCode) }
+      `🤝 *Ваша сделка #${deal.dealCode}*\n\n` +
+        `📦 Товар: ${deal.description}\n` +
+        `💵 Цена: ${formatCurrency(deal.amount, deal.currency)}\n` +
+        `📌 Статус: ${statusLabel(deal.status)}\n\n` +
+        `_Ожидайте уведомления об оплате от покупателя_`,
+      { parse_mode: "Markdown", ...sellerDealKeyboard(parseInt(deal.dealCode)) }
     );
     return;
   }
 
-  const isSellerdeal = deal.sellerTelegramId === 0;
-  if (isSellerdeal) {
-    await updateDealStatus(dealCode, "active", undefined);
-  } else {
-    await updateDealStatus(dealCode, "active", userId);
+  if (deal.status !== "pending") {
+    await ctx.reply(
+      `Сделка #${deal.dealCode} уже ${statusLabel(deal.status).toLowerCase()}.`,
+      mainMenuKeyboard
+    );
+    return;
   }
 
   await ctx.reply(
-    `✅ *Вы присоединились к сделке #${dealCode}!*\n\n` +
-      `📦 Товар: *${deal.description}*\n` +
-      `💰 Сумма: *${formatCurrency(deal.amount, deal.currency)}*\n\n` +
-      `После передачи товара нажмите «Подтвердить получение»`,
-    { parse_mode: "Markdown", ...dealActionKeyboard(dealCode) }
+    `🤝 *Страница сделки*\n\n` +
+      `📦 Товар: ${deal.description}\n` +
+      `💵 Сумма: ${formatCurrency(deal.amount, deal.currency)}\n` +
+      `🆔 ID сделки: ${deal.dealCode}\n\n` +
+      `Средства будут списаны с вашего баланса в боте.\n` +
+      `Нажмите кнопку ниже, чтобы подтвердить оплату.`,
+    { parse_mode: "Markdown", ...dealPageKeyboard(parseInt(deal.dealCode)) }
   );
-
-  try {
-    const notifyId = isSellerdeal ? deal.buyerTelegramId : deal.sellerTelegramId;
-    if (notifyId) {
-      await ctx.telegram.sendMessage(
-        notifyId,
-        `🔔 *Партнёр присоединился к сделке #${dealCode}!*\n\nСделка активна. Ожидайте передачи товара.`,
-        { parse_mode: "Markdown" }
-      );
-    }
-  } catch {}
 }
