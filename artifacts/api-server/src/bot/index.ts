@@ -26,6 +26,7 @@ import {
   formatCurrency,
   parseCurrencyFromButton,
   statusLabel,
+  md,
 } from "./utils.js";
 
 interface BotContext extends Context {
@@ -194,7 +195,7 @@ export function createBot() {
       const buyerInfo = deal.buyerTelegramId ? `ID ${deal.buyerTelegramId}` : "—";
       await ctx.reply(
         `🔑 *Сделка #${deal.dealCode}*\n` +
-          `📦 ${deal.description}\n` +
+          `📦 ${md(deal.description)}\n` +
           `💵 ${formatCurrency(deal.amount, deal.currency)}\n` +
           `📌 ${statusLabel(deal.status)}\n` +
           `👤 Продавец: \`${sellerInfo}\`\n` +
@@ -437,7 +438,7 @@ export function createBot() {
 
     await ctx.reply(
       `✅ *Сделка успешно создана!*\n\n` +
-        `📦 Товар: ${draft.description}\n` +
+        `📦 Товар: ${md(draft.description)}\n` +
         `💵 Цена: ${formatCurrency(draft.amount!, currency)}\n` +
         `🆔 ID сделки: ${deal.dealCode}\n\n` +
         `🔗 *Ссылка для покупателя:*\n` +
@@ -495,7 +496,7 @@ export function createBot() {
 
     await ctx.reply(
       `✅ *Оплата прошла успешно!*\n\n` +
-        `📦 Товар: ${deal.description}\n` +
+        `📦 Товар: ${md(deal.description)}\n` +
         `💵 Сумма: ${formatCurrency(deal.amount, deal.currency)}\n` +
         `🆔 ID сделки: ${deal.dealCode}\n\n` +
         `Ожидайте передачи товара. По вопросам: ${MANAGER}`,
@@ -507,7 +508,7 @@ export function createBot() {
       await bot.telegram.sendMessage(
         deal.sellerTelegramId,
         `💰 *Покупатель оплатил сделку #${deal.dealCode}!*\n\n` +
-          `📦 Товар: ${deal.description}\n` +
+          `📦 Товар: ${md(deal.description)}\n` +
           `💵 Сумма: ${formatCurrency(deal.amount, deal.currency)}\n\n` +
           `📌 Передайте товар менеджеру ${MANAGER} для завершения сделки.`,
         { parse_mode: "Markdown" }
@@ -568,7 +569,7 @@ export function createBot() {
       ctx.session.dealDraft = { description: text };
       ctx.session.step = "deal_amount";
       await ctx.reply(
-        `✅ Название сохранено: *${text}*\n\n` +
+        `✅ Название сохранено: *${md(text)}*\n\n` +
           `💰 *Шаг 2 из 3 — Введите цену:*\n\n` +
           `✅ Примеры:\n` +
           `• 500 — целое число\n` +
@@ -622,7 +623,7 @@ async function handleDealPage(ctx: BotContext, dealCode: string) {
   if (deal.sellerTelegramId === userId) {
     await ctx.reply(
       `🤝 *Ваша сделка #${deal.dealCode}*\n\n` +
-        `📦 Товар: ${deal.description}\n` +
+        `📦 Товар: ${md(deal.description)}\n` +
         `💵 Цена: ${formatCurrency(deal.amount, deal.currency)}\n` +
         `📌 Статус: ${statusLabel(deal.status)}\n\n` +
         `_Ожидайте уведомления об оплате от покупателя_`,
@@ -641,7 +642,7 @@ async function handleDealPage(ctx: BotContext, dealCode: string) {
 
   await ctx.reply(
     `🤝 *Страница сделки*\n\n` +
-      `📦 Товар: ${deal.description}\n` +
+      `📦 Товар: ${md(deal.description)}\n` +
       `💵 Сумма: ${formatCurrency(deal.amount, deal.currency)}\n` +
       `🆔 ID сделки: ${deal.dealCode}\n\n` +
       `Средства будут списаны с вашего баланса в боте.\n` +
