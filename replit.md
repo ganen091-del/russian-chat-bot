@@ -1,45 +1,55 @@
-# [Project name]
+# NFT Гарант Бот
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Telegram-бот-гарант для безопасных сделок с цифровыми товарами (NFT, скины, аккаунты, Stars, крипта).
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `pnpm --filter @workspace/api-server run dev` — запустить сервер + Telegram бот (порт 5000)
+- `pnpm run typecheck` — проверка типов по всем пакетам
+- `pnpm run build` — typecheck + сборка всех пакетов
+- `pnpm --filter @workspace/db run push` — применить изменения схемы БД (только dev)
+- Требуемые env: `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
+- Telegram: Telegraf v4
 - Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Build: esbuild (ESM bundle)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `lib/db/src/schema/` — схемы таблиц (users, wallets, deals, wallet_transactions)
+- `artifacts/api-server/src/bot/` — весь код Telegram бота
+  - `index.ts` — главный файл бота, все хэндлеры
+  - `db.ts` — запросы к базе данных
+  - `keyboards.ts` — клавиатуры и inline-кнопки
+  - `utils.ts` — вспомогательные функции
+  - `session.ts` — типы сессии
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Бот запускается вместе с Express-сервером в одном процессе через `bot.launch()` (long polling)
+- Сессия пользователя хранится в памяти через telegraf session middleware (шаги создания сделки)
+- Telegram ID используется как primary key в таблице users
+- Сделки имеют уникальный 8-символьный код (hex), ссылка для приглашения партнёра через `?start=deal_CODE`
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- `/start` — приветствие + главное меню
+- **Создать сделку 🤝** — пошаговое создание сделки (роль → описание → сумма → валюта → подтверждение)
+- **Кошелек 💼** — балансы в ГРН, РУБ, TON, Звёздах + история транзакций
+- **Моя статистика 📈** — количество сделок (всего / завершённых / активных / отменённых)
+- **Поддержка 🆘** — контакт поддержки + FAQ
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Общение на русском языке
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- После изменения схемы БД нужно: `pnpm --filter @workspace/db run push`
+- При первом запуске таблицы создаются автоматически через drizzle push
+- Бот работает через long polling (не webhook) — удобно для dev/Replit
