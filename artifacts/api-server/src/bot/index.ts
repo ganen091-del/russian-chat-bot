@@ -411,8 +411,8 @@ export function createBot() {
 
     ctx.session = {};
 
-    const botInfo = await bot.telegram.getMe();
-    const dealLink = `https://t.me/${botInfo.username}?start=deal_${deal.dealCode}`;
+    const botUsername = ctx.botInfo.username;
+    const dealLink = `https://t.me/${botUsername}?start=deal_${deal.dealCode}`;
 
     await ctx.reply(
       `✅ *Сделка успешно создана!*\n\n` +
