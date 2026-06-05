@@ -18,6 +18,9 @@ import {
   getDealByCode,
   updateDealStatus,
   getUserStats,
+  getOpenDeals,
+  getAllDealsStats,
+  getAllUsersCount,
 } from "./db.js";
 import {
   formatCurrency,
@@ -134,6 +137,121 @@ export function createBot() {
       );
     } catch {
       // пользователь мог не запустить бота
+    }
+  });
+
+  // ──────────────────────────────────────────
+  // /admin — панель администратора
+  // ──────────────────────────────────────────
+  bot.command("admin", async (ctx) => {
+    const [deals, stats, usersCount] = await Promise.all([
+      getOpenDeals(),
+      getAllDealsStats(),
+      getAllUsersCount(),
+    ]);
+
+    const header =
+      `🛠 *Панель администратора*\n\n` +
+      `👥 Пользователей: *${usersCount}*\n\n` +
+      `📊 *Статистика сделок:*\n` +
+      `▪️ Всего: ${stats.total}\n` +
+      `▪️ Ожидают оплаты: ${stats.pending}\n` +
+      `▪️ Активных: ${stats.active}\n` +
+      `▪️ Завершённых: ${stats.completed}\n` +
+      `▪️ Отменённых: ${stats.cancelled}\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `🔓 *Открытые сделки (${deals.length}):*`;
+
+    if (deals.length === 0) {
+      await ctx.reply(header + "\n\n_Нет открытых сделок_", {
+        parse_mode: "Markdown",
+        ...mainMenuKeyboard,
+      });
+      return;
+    }
+
+    await ctx.reply(header, { parse_mode: "Markdown" });
+
+    // Показываем каждую открытую сделку отдельным сообщением с кнопками управления
+    const { Markup } = await import("telegraf");
+    for (const deal of deals.slice(0, 20)) {
+      const sellerInfo = `ID ${deal.sellerTelegramId}`;
+      const buyerInfo = deal.buyerTelegramId ? `ID ${deal.buyerTelegramId}` : "—";
+      await ctx.reply(
+        `🔑 *Сделка #${deal.dealCode}*\n` +
+          `📦 ${deal.description}\n` +
+          `💵 ${formatCurrency(deal.amount, deal.currency)}\n` +
+          `📌 ${statusLabel(deal.status)}\n` +
+          `👤 Продавец: \`${sellerInfo}\`\n` +
+          `🛒 Покупатель: \`${buyerInfo}\`\n` +
+          `🕐 ${deal.createdAt.toLocaleString("ru-RU", { timeZone: "Europe/Kyiv" })}`,
+        {
+          parse_mode: "Markdown",
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback("✅ Завершить", `admin_complete_${deal.dealCode}`),
+              Markup.button.callback("❌ Отменить", `admin_cancel_${deal.dealCode}`),
+            ],
+          ]),
+        }
+      );
+    }
+
+    if (deals.length > 20) {
+      await ctx.reply(`_...и ещё ${deals.length - 20} сделок_`, { parse_mode: "Markdown" });
+    }
+  });
+
+  // Admin: завершить сделку принудительно
+  bot.action(/^admin_complete_(\d+)$/, async (ctx) => {
+    const dealCode = ctx.match[1]!;
+    await ctx.answerCbQuery("✅ Сделка завершена");
+    const deal = await getDealByCode(dealCode);
+    if (!deal) { await ctx.reply("❌ Сделка не найдена."); return; }
+    if (deal.status === "completed") { await ctx.reply("Сделка уже завершена."); return; }
+
+    await updateDealStatus(dealCode, "completed");
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    await ctx.reply(
+      `✅ *Сделка #${dealCode} завершена администратором.*`,
+      { parse_mode: "Markdown" }
+    );
+
+    // Уведомляем участников
+    for (const uid of [deal.sellerTelegramId, deal.buyerTelegramId].filter(Boolean) as number[]) {
+      try {
+        await bot.telegram.sendMessage(
+          uid,
+          `✅ *Сделка #${dealCode} завершена администратором.*\n\nПо вопросам: ${MANAGER}`,
+          { parse_mode: "Markdown" }
+        );
+      } catch {}
+    }
+  });
+
+  // Admin: отменить сделку принудительно
+  bot.action(/^admin_cancel_(\d+)$/, async (ctx) => {
+    const dealCode = ctx.match[1]!;
+    await ctx.answerCbQuery("❌ Сделка отменена");
+    const deal = await getDealByCode(dealCode);
+    if (!deal) { await ctx.reply("❌ Сделка не найдена."); return; }
+    if (deal.status === "cancelled") { await ctx.reply("Сделка уже отменена."); return; }
+
+    await updateDealStatus(dealCode, "cancelled");
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    await ctx.reply(
+      `❌ *Сделка #${dealCode} отменена администратором.*`,
+      { parse_mode: "Markdown" }
+    );
+
+    for (const uid of [deal.sellerTelegramId, deal.buyerTelegramId].filter(Boolean) as number[]) {
+      try {
+        await bot.telegram.sendMessage(
+          uid,
+          `❌ *Сделка #${dealCode} отменена администратором.*\n\nПо вопросам: ${MANAGER}`,
+          { parse_mode: "Markdown" }
+        );
+      } catch {}
     }
   });
 

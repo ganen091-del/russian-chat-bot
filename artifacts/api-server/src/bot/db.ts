@@ -1,4 +1,4 @@
-import { eq, or, desc } from "drizzle-orm";
+import { eq, or, desc, inArray } from "drizzle-orm";
 import { db } from "@workspace/db";
 import {
   usersTable,
@@ -240,4 +240,28 @@ export async function getUserStats(telegramId: number) {
     buyerTotal: asBuyer.length,
     buyerCompleted: asBuyer.filter((d) => d.status === "completed").length,
   };
+}
+
+export async function getOpenDeals(): Promise<Deal[]> {
+  return db
+    .select()
+    .from(dealsTable)
+    .where(inArray(dealsTable.status, ["pending", "active"]))
+    .orderBy(desc(dealsTable.createdAt));
+}
+
+export async function getAllDealsStats() {
+  const all = await db.select().from(dealsTable);
+  return {
+    total: all.length,
+    pending: all.filter((d) => d.status === "pending").length,
+    active: all.filter((d) => d.status === "active").length,
+    completed: all.filter((d) => d.status === "completed").length,
+    cancelled: all.filter((d) => d.status === "cancelled").length,
+  };
+}
+
+export async function getAllUsersCount(): Promise<number> {
+  const users = await db.select().from(usersTable);
+  return users.length;
 }
