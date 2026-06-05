@@ -55,8 +55,8 @@ export function createBot() {
     });
 
     const startParam = ctx.startPayload;
-    if (startParam && startParam.startsWith("deal_")) {
-      const dealCode = startParam.replace("deal_", "");
+    if (startParam && startParam.startsWith("deal-")) {
+      const dealCode = startParam.replace("deal-", "");
       await handleDealPage(ctx, dealCode);
       return;
     }
@@ -412,7 +412,7 @@ export function createBot() {
     ctx.session = {};
 
     const botUsername = ctx.botInfo.username;
-    const dealLink = `https://t.me/${botUsername}?start=deal_${deal.dealCode}`;
+    const dealLink = `https://t.me/${botUsername}?start=deal-${deal.dealCode}`;
 
     await ctx.reply(
       `✅ *Сделка успешно создана!*\n\n` +
