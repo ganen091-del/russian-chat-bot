@@ -44,6 +44,11 @@ export function createBot() {
   const bot = new Telegraf<BotContext>(token);
   bot.use(session({ defaultSession: (): SessionData => ({}) }));
 
+  bot.catch((err, ctx) => {
+    logger.error({ err, updateType: ctx.updateType }, "Bot handler error");
+    ctx.reply("⚠️ Произошла внутренняя ошибка. Попробуйте ещё раз или обратитесь в поддержку.").catch(() => {});
+  });
+
   // ──────────────────────────────────────────
   // /start
   // ──────────────────────────────────────────

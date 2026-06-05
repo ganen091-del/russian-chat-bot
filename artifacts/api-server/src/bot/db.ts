@@ -23,9 +23,16 @@ export async function upsertUser(telegramId: number, data: {
     .limit(1);
 
   if (existing.length > 0) {
+    const fields: Partial<typeof usersTable.$inferInsert> = {};
+    if (data.username !== undefined) fields.username = data.username;
+    if (data.firstName !== undefined) fields.firstName = data.firstName;
+    if (data.lastName !== undefined) fields.lastName = data.lastName;
+
+    if (Object.keys(fields).length === 0) return existing[0]!;
+
     const [updated] = await db
       .update(usersTable)
-      .set({ username: data.username, firstName: data.firstName, lastName: data.lastName })
+      .set(fields)
       .where(eq(usersTable.telegramId, telegramId))
       .returning();
     return updated!;
