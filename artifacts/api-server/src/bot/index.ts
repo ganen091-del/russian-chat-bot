@@ -44,10 +44,20 @@ export function createBot() {
   const bot = new Telegraf<BotContext>(token);
   bot.use(session({ defaultSession: (): SessionData => ({}) }));
 
+  let cachedBotUsername = "";
+
   bot.catch((err, ctx) => {
     logger.error({ err, updateType: ctx.updateType }, "Bot handler error");
     ctx.reply("⚠️ Произошла внутренняя ошибка. Попробуйте ещё раз или обратитесь в поддержку.").catch(() => {});
   });
+
+  // Кешируем username при первом обращении
+  async function getBotUsername(): Promise<string> {
+    if (cachedBotUsername) return cachedBotUsername;
+    const info = await bot.telegram.getMe();
+    cachedBotUsername = info.username ?? "";
+    return cachedBotUsername;
+  }
 
   // ──────────────────────────────────────────
   // /start
@@ -406,17 +416,23 @@ export function createBot() {
     const currency = parseCurrencyFromButton(ctx.message.text);
     if (!currency) return;
 
-    const draft = ctx.session.dealDraft!;
+    const draft = ctx.session.dealDraft;
+    if (!draft?.description || !draft?.amount) {
+      ctx.session = {};
+      await ctx.reply("❌ Данные сделки утеряны. Начните создание заново.", mainMenuKeyboard);
+      return;
+    }
+
     const deal = await createDeal({
       sellerTelegramId: ctx.from.id,
-      description: draft.description!,
-      amount: draft.amount!,
+      description: draft.description,
+      amount: draft.amount,
       currency,
     });
 
     ctx.session = {};
 
-    const botUsername = ctx.botInfo.username;
+    const botUsername = await getBotUsername();
     const dealLink = `https://t.me/${botUsername}?start=deal-${deal.dealCode}`;
 
     await ctx.reply(
