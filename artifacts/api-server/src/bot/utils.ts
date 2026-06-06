@@ -72,6 +72,6 @@ export function hasSufficientBalance(wallet: {
   }
 }
 
-export function md(text: string): string {
-  return text.replace(/[_*`[]/g, (c) => `\\${c}`);
+export function esc(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

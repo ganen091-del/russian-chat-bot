@@ -26,7 +26,7 @@ import {
   formatCurrency,
   parseCurrencyFromButton,
   statusLabel,
-  md,
+  esc,
 } from "./utils.js";
 
 interface BotContext extends Context {
@@ -34,6 +34,7 @@ interface BotContext extends Context {
 }
 
 const MANAGER = "@GarantTGifts";
+const H = "HTML" as const;
 
 export function createBot() {
   const token = process.env["TELEGRAM_BOT_TOKEN"];
@@ -48,12 +49,10 @@ export function createBot() {
   let cachedBotUsername = "";
 
   bot.catch((err, ctx) => {
-    const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
     logger.error({ err, updateType: ctx.updateType }, "Bot handler error");
-    ctx.reply(`🔴 DEBUG ERROR:\n${msg.slice(0, 3000)}`).catch(() => {});
+    ctx.reply("⚠️ Произошла внутренняя ошибка. Попробуйте ещё раз или обратитесь в поддержку.").catch(() => {});
   });
 
-  // Кешируем username при первом обращении
   async function getBotUsername(): Promise<string> {
     if (cachedBotUsername) return cachedBotUsername;
     const info = await bot.telegram.getMe();
@@ -79,31 +78,31 @@ export function createBot() {
     }
 
     await ctx.reply(
-      `🤖 *Добро пожаловать в NFT Гарант Бот!*\n\n` +
+      `🤖 <b>Добро пожаловать в NFT Гарант Бот!</b>\n\n` +
         `🛡️ Я — безопасный посредник (гарант) при обмене цифровых товаров:\n` +
         `• NFT и цифровых активов\n` +
         `• Игровых скинов, предметов, аккаунтов\n` +
         `• Подарков Telegram (Stars)\n` +
         `• Игровых валют и криптовалют\n\n` +
-        `⚙️ *Что умеет бот:*\n` +
+        `⚙️ <b>Что умеет бот:</b>\n` +
         `🔹 Создание защищённых сделок за 1 минуту\n` +
         `🔹 Кошелёк с несколькими валютами (ГРН, РУБ, TON, Звёзды)\n` +
         `🔹 Уведомления продавцу и покупателю в реальном времени\n` +
         `🔹 Поддержка 24/7 — ответ до 5 минут\n` +
         `🔹 11 742 успешных сделок без единого обмана\n\n` +
         `📌 Выберите раздел кнопками снизу`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
+      { parse_mode: H, ...mainMenuKeyboard }
     );
   });
 
   // ──────────────────────────────────────────
-  // /add <telegramId> <amount> <currency>  — пополнение баланса
+  // /add <telegramId> <amount> <currency>
   // ──────────────────────────────────────────
   bot.command("add", async (ctx) => {
     const text = ctx.message.text.trim();
     const parts = text.split(/\s+/);
     if (parts.length !== 4) {
-      await ctx.reply("❌ Формат: /add <ID> <сумма> <валюта>\nПример: /add 123456789 1250 Руб");
+      await ctx.reply("❌ Формат: /add &lt;ID&gt; &lt;сумма&gt; &lt;валюта&gt;\nПример: /add 123456789 1250 Руб", { parse_mode: H });
       return;
     }
 
@@ -131,26 +130,26 @@ export function createBot() {
     const wallet = await getWallet(targetId);
 
     await ctx.reply(
-      `✅ Баланс пользователя \`${targetId}\` пополнен на *${formatCurrency(amount, currency)}*\n\n` +
+      `✅ Баланс пользователя <code>${targetId}</code> пополнен на <b>${esc(formatCurrency(amount, currency))}</b>\n\n` +
         `💼 Текущий баланс:\n` +
         `▪️ ${parseFloat(wallet.uah).toFixed(2)} ГРН\n` +
         `▪️ ${parseFloat(wallet.rub).toFixed(2)} РУБ\n` +
         `▪️ ${parseFloat(wallet.ton).toFixed(6)} TON\n` +
         `▪️ ${Math.round(parseFloat(wallet.stars))} Звёзды`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
+      { parse_mode: H, ...mainMenuKeyboard }
     );
 
     try {
       await bot.telegram.sendMessage(
         targetId,
-        `💸 *Ваш баланс пополнен!*\n\n` +
-          `Зачислено: *${formatCurrency(amount, currency)}*\n\n` +
+        `💸 <b>Ваш баланс пополнен!</b>\n\n` +
+          `Зачислено: <b>${esc(formatCurrency(amount, currency))}</b>\n\n` +
           `💼 Текущий баланс:\n` +
           `▪️ ${parseFloat(wallet.uah).toFixed(2)} ГРН\n` +
           `▪️ ${parseFloat(wallet.rub).toFixed(2)} РУБ\n` +
           `▪️ ${parseFloat(wallet.ton).toFixed(6)} TON\n` +
           `▪️ ${Math.round(parseFloat(wallet.stars))} Звёзды`,
-        { parse_mode: "Markdown" }
+        { parse_mode: H }
       );
     } catch {
       // пользователь мог не запустить бота
@@ -168,42 +167,41 @@ export function createBot() {
     ]);
 
     const header =
-      `🛠 *Панель администратора*\n\n` +
-      `👥 Пользователей: *${usersCount}*\n\n` +
-      `📊 *Статистика сделок:*\n` +
+      `🛠 <b>Панель администратора</b>\n\n` +
+      `👥 Пользователей: <b>${usersCount}</b>\n\n` +
+      `📊 <b>Статистика сделок:</b>\n` +
       `▪️ Всего: ${stats.total}\n` +
       `▪️ Ожидают оплаты: ${stats.pending}\n` +
       `▪️ Активных: ${stats.active}\n` +
       `▪️ Завершённых: ${stats.completed}\n` +
       `▪️ Отменённых: ${stats.cancelled}\n\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
-      `🔓 *Открытые сделки (${deals.length}):*`;
+      `🔓 <b>Открытые сделки (${deals.length}):</b>`;
 
     if (deals.length === 0) {
-      await ctx.reply(header + "\n\n_Нет открытых сделок_", {
-        parse_mode: "Markdown",
+      await ctx.reply(header + "\n\n<i>Нет открытых сделок</i>", {
+        parse_mode: H,
         ...mainMenuKeyboard,
       });
       return;
     }
 
-    await ctx.reply(header, { parse_mode: "Markdown" });
+    await ctx.reply(header, { parse_mode: H });
 
-    // Показываем каждую открытую сделку отдельным сообщением с кнопками управления
     const { Markup } = await import("telegraf");
     for (const deal of deals.slice(0, 20)) {
       const sellerInfo = `ID ${deal.sellerTelegramId}`;
       const buyerInfo = deal.buyerTelegramId ? `ID ${deal.buyerTelegramId}` : "—";
       await ctx.reply(
-        `🔑 *Сделка #${deal.dealCode}*\n` +
-          `📦 ${md(deal.description)}\n` +
-          `💵 ${formatCurrency(deal.amount, deal.currency)}\n` +
-          `📌 ${statusLabel(deal.status)}\n` +
-          `👤 Продавец: \`${sellerInfo}\`\n` +
-          `🛒 Покупатель: \`${buyerInfo}\`\n` +
+        `🔑 <b>Сделка #${deal.dealCode}</b>\n` +
+          `📦 ${esc(deal.description)}\n` +
+          `💵 ${esc(formatCurrency(deal.amount, deal.currency))}\n` +
+          `📌 ${esc(statusLabel(deal.status))}\n` +
+          `👤 Продавец: <code>${sellerInfo}</code>\n` +
+          `🛒 Покупатель: <code>${buyerInfo}</code>\n` +
           `🕐 ${deal.createdAt.toLocaleString("ru-RU", { timeZone: "Europe/Kyiv" })}`,
         {
-          parse_mode: "Markdown",
+          parse_mode: H,
           ...Markup.inlineKeyboard([
             [
               Markup.button.callback("✅ Завершить", `admin_complete_${deal.dealCode}`),
@@ -215,7 +213,7 @@ export function createBot() {
     }
 
     if (deals.length > 20) {
-      await ctx.reply(`_...и ещё ${deals.length - 20} сделок_`, { parse_mode: "Markdown" });
+      await ctx.reply(`<i>...и ещё ${deals.length - 20} сделок</i>`, { parse_mode: H });
     }
   });
 
@@ -230,17 +228,16 @@ export function createBot() {
     await updateDealStatus(dealCode, "completed");
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
     await ctx.reply(
-      `✅ *Сделка #${dealCode} завершена администратором.*`,
-      { parse_mode: "Markdown" }
+      `✅ <b>Сделка #${dealCode} завершена администратором.</b>`,
+      { parse_mode: H }
     );
 
-    // Уведомляем участников
     for (const uid of [deal.sellerTelegramId, deal.buyerTelegramId].filter(Boolean) as number[]) {
       try {
         await bot.telegram.sendMessage(
           uid,
-          `✅ *Сделка #${dealCode} завершена администратором.*\n\nПо вопросам: ${MANAGER}`,
-          { parse_mode: "Markdown" }
+          `✅ <b>Сделка #${dealCode} завершена администратором.</b>\n\nПо вопросам: ${MANAGER}`,
+          { parse_mode: H }
         );
       } catch {}
     }
@@ -257,16 +254,16 @@ export function createBot() {
     await updateDealStatus(dealCode, "cancelled");
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
     await ctx.reply(
-      `❌ *Сделка #${dealCode} отменена администратором.*`,
-      { parse_mode: "Markdown" }
+      `❌ <b>Сделка #${dealCode} отменена администратором.</b>`,
+      { parse_mode: H }
     );
 
     for (const uid of [deal.sellerTelegramId, deal.buyerTelegramId].filter(Boolean) as number[]) {
       try {
         await bot.telegram.sendMessage(
           uid,
-          `❌ *Сделка #${dealCode} отменена администратором.*\n\nПо вопросам: ${MANAGER}`,
-          { parse_mode: "Markdown" }
+          `❌ <b>Сделка #${dealCode} отменена администратором.</b>\n\nПо вопросам: ${MANAGER}`,
+          { parse_mode: H }
         );
       } catch {}
     }
@@ -282,7 +279,7 @@ export function createBot() {
     });
     ctx.session = { step: "deal_description", dealDraft: {} };
     await ctx.reply(
-      `🤝 *Создание сделки — Шаг 1 из 3*\n\n` +
+      `🤝 <b>Создание сделки — Шаг 1 из 3</b>\n\n` +
         `📦 Введите название товара или услуги:\n\n` +
         `✅ Примеры:\n` +
         `• Скин AK-47 Redline MW CS2\n` +
@@ -291,7 +288,7 @@ export function createBot() {
         `• Аккаунт Steam MMR 4500\n` +
         `• Игровая валюта 10 000 золота\n\n` +
         `✏️ Напишите название в следующем сообщении:`,
-      { parse_mode: "Markdown", ...cancelKeyboard }
+      { parse_mode: H, ...cancelKeyboard }
     );
   });
 
@@ -305,8 +302,8 @@ export function createBot() {
     });
     const wallet = await getWallet(ctx.from.id);
     await ctx.reply(
-      `💼 *Ваш кошелёк*\n\n` +
-        `🆔 Ваш ID для пополнения: \`${ctx.from.id}\`\n\n` +
+      `💼 <b>Ваш кошелёк</b>\n\n` +
+        `🆔 Ваш ID для пополнения: <code>${ctx.from.id}</code>\n\n` +
         `💵 Текущий баланс:\n` +
         `▪️ ${parseFloat(wallet.uah).toFixed(2)} ГРН\n` +
         `▪️ ${parseFloat(wallet.rub).toFixed(2)} РУБ\n` +
@@ -315,11 +312,11 @@ export function createBot() {
         `ℹ️ Баланс используется для оплаты сделок в боте.\n\n` +
         `📩 Как пополнить баланс:\n` +
         `1. Напишите ${MANAGER}\n` +
-        `2. Сообщите ваш ID: \`${ctx.from.id}\`\n` +
+        `2. Сообщите ваш ID: <code>${ctx.from.id}</code>\n` +
         `3. Укажите нужную сумму и валюту\n` +
         `4. Оплатите удобным способом\n\n` +
         `⏱ Зачисление в течение 5-10 минут после подтверждения оплаты.`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
+      { parse_mode: H, ...mainMenuKeyboard }
     );
   });
 
@@ -337,23 +334,23 @@ export function createBot() {
     ]);
 
     await ctx.reply(
-      `📈 *Ваша личная статистика*\n\n` +
-        `🆔 Ваш ID: \`${ctx.from.id}\`\n\n` +
+      `📈 <b>Ваша личная статистика</b>\n\n` +
+        `🆔 Ваш ID: <code>${ctx.from.id}</code>\n\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `🤝 *Как продавец:*\n` +
+        `🤝 <b>Как продавец:</b>\n` +
         `▪️ Создано сделок: ${stats.sellerTotal}\n` +
         `▪️ Завершено: ${stats.sellerCompleted}\n` +
         `▪️ Активных: ${stats.sellerActive}\n\n` +
-        `🛒 *Как покупатель:*\n` +
+        `🛒 <b>Как покупатель:</b>\n` +
         `▪️ Оплачено сделок: ${stats.buyerCompleted} из ${stats.buyerTotal}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `💼 *Текущий баланс:*\n` +
+        `💼 <b>Текущий баланс:</b>\n` +
         `▪️ ${parseFloat(wallet.uah).toFixed(2)} ГРН\n` +
         `▪️ ${parseFloat(wallet.rub).toFixed(2)} РУБ\n` +
         `▪️ ${parseFloat(wallet.ton).toFixed(6)} TON\n` +
         `▪️ ${Math.round(parseFloat(wallet.stars))} Звёзды\n\n` +
         `📩 Для пополнения обратитесь в 🆘 Поддержку.`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
+      { parse_mode: H, ...mainMenuKeyboard }
     );
   });
 
@@ -362,19 +359,19 @@ export function createBot() {
   // ──────────────────────────────────────────
   bot.hears("Поддержка 🆘", async (ctx) => {
     await ctx.reply(
-      `🆘 *Служба поддержки NFT Гарант Бота*\n\n` +
+      `🆘 <b>Служба поддержки NFT Гарант Бота</b>\n\n` +
         `👤 Официальный менеджер: ${MANAGER}\n\n` +
         `⏱ Время ответа: до 5 минут\n\n` +
-        `📋 *Чем помогаем:*\n` +
+        `📋 <b>Чем помогаем:</b>\n` +
         `• Спорные ситуации между продавцом и покупателем\n` +
         `• Пополнение баланса любой валютой\n` +
         `• Возврат средств при отмене сделки\n` +
         `• Технические неполадки\n` +
         `• Консультация по безопасным сделкам\n\n` +
-        `⚠️ *Осторожно, мошенники!*\n` +
+        `⚠️ <b>Осторожно, мошенники!</b>\n` +
         `Единственный официальный аккаунт — ${MANAGER}.\n` +
         `Не отвечайте на сообщения от других аккаунтов с похожими именами.`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
+      { parse_mode: H, ...mainMenuKeyboard }
     );
   });
 
@@ -383,22 +380,22 @@ export function createBot() {
   // ──────────────────────────────────────────
   bot.hears("Инструкция 📄", async (ctx) => {
     await ctx.reply(
-      `📖 *Как создать безопасную сделку — пошагово*\n\n` +
+      `📖 <b>Как создать безопасную сделку — пошагово</b>\n\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `*Шаг 1 — Продавец создаёт сделку:*\n` +
+        `<b>Шаг 1 — Продавец создаёт сделку:</b>\n` +
         `Нажмите 🤝 Создать сделку и следуйте инструкциям. Вы введёте название товара, цену и валюту. Бот выдаст уникальную ссылку.\n\n` +
-        `*Шаг 2 — Покупатель переходит по ссылке:*\n` +
+        `<b>Шаг 2 — Покупатель переходит по ссылке:</b>\n` +
         `Отправьте ссылку покупателю. Он открывает её в Telegram, видит все детали сделки и нажимает «Оплатить». Средства списываются с его баланса в боте.\n\n` +
-        `*Шаг 3 — Передача товара:*\n` +
+        `<b>Шаг 3 — Передача товара:</b>\n` +
         `Продавец передаёт товар менеджеру ${MANAGER}. Менеджер проверяет товар и переводит деньги продавцу.\n\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `✅ *Примеры успешных сделок:*\n` +
+        `✅ <b>Примеры успешных сделок:</b>\n` +
         `• NFT Notcoin #4821 за 12 TON — закрыто за 8 минут\n` +
         `• Скин AK-47 Redline MW CS2 за 3 200 руб — без споров\n` +
         `• Подарок Telegram 500 Stars — мгновенная оплата\n` +
         `• Аккаунт Steam с MMR 4500 — проверен и передан\n\n` +
-        `💡 *Важно:* Пополните баланс через поддержку перед первой сделкой. Для оплаты нужны средства на счёте в боте.`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
+        `💡 <b>Важно:</b> Пополните баланс через поддержку перед первой сделкой. Для оплаты нужны средства на счёте в боте.`,
+      { parse_mode: H, ...mainMenuKeyboard }
     );
   });
 
@@ -438,19 +435,19 @@ export function createBot() {
     const dealLink = `https://t.me/${botUsername}?start=deal-${deal.dealCode}`;
 
     await ctx.reply(
-      `✅ *Сделка успешно создана!*\n\n` +
-        `📦 Товар: ${md(draft.description)}\n` +
-        `💵 Цена: ${formatCurrency(draft.amount!, currency)}\n` +
+      `✅ <b>Сделка успешно создана!</b>\n\n` +
+        `📦 Товар: ${esc(draft.description)}\n` +
+        `💵 Цена: ${esc(formatCurrency(draft.amount, currency))}\n` +
         `🆔 ID сделки: ${deal.dealCode}\n\n` +
-        `🔗 *Ссылка для покупателя:*\n` +
+        `🔗 <b>Ссылка для покупателя:</b>\n` +
         `${dealLink}\n\n` +
-        `📋 *Что делать дальше:*\n` +
+        `📋 <b>Что делать дальше:</b>\n` +
         `1. Скопируйте ссылку выше\n` +
         `2. Отправьте её покупателю\n` +
         `3. Дождитесь уведомления об оплате\n` +
         `4. Передайте товар ${MANAGER}\n\n` +
         `⏳ Ссылка активна до момента оплаты.`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
+      { parse_mode: H, ...mainMenuKeyboard }
     );
   });
 
@@ -485,10 +482,10 @@ export function createBot() {
 
     if (!result.success) {
       await ctx.reply(
-        `❌ *Недостаточно средств*\n\n` +
-          `Для оплаты нужно: *${formatCurrency(deal.amount, deal.currency)}*\n\n` +
+        `❌ <b>Недостаточно средств</b>\n\n` +
+          `Для оплаты нужно: <b>${esc(formatCurrency(deal.amount, deal.currency))}</b>\n\n` +
           `Пополните баланс через ${MANAGER} и попробуйте снова.`,
-        { parse_mode: "Markdown" }
+        { parse_mode: H }
       );
       return;
     }
@@ -496,23 +493,22 @@ export function createBot() {
     await updateDealStatus(dealCode, "completed", ctx.from!.id);
 
     await ctx.reply(
-      `✅ *Оплата прошла успешно!*\n\n` +
-        `📦 Товар: ${md(deal.description)}\n` +
-        `💵 Сумма: ${formatCurrency(deal.amount, deal.currency)}\n` +
+      `✅ <b>Оплата прошла успешно!</b>\n\n` +
+        `📦 Товар: ${esc(deal.description)}\n` +
+        `💵 Сумма: ${esc(formatCurrency(deal.amount, deal.currency))}\n` +
         `🆔 ID сделки: ${deal.dealCode}\n\n` +
         `Ожидайте передачи товара. По вопросам: ${MANAGER}`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
+      { parse_mode: H, ...mainMenuKeyboard }
     );
 
-    // Уведомляем продавца
     try {
       await bot.telegram.sendMessage(
         deal.sellerTelegramId,
-        `💰 *Покупатель оплатил сделку #${deal.dealCode}!*\n\n` +
-          `📦 Товар: ${md(deal.description)}\n` +
-          `💵 Сумма: ${formatCurrency(deal.amount, deal.currency)}\n\n` +
+        `💰 <b>Покупатель оплатил сделку #${deal.dealCode}!</b>\n\n` +
+          `📦 Товар: ${esc(deal.description)}\n` +
+          `💵 Сумма: ${esc(formatCurrency(deal.amount, deal.currency))}\n\n` +
           `📌 Передайте товар менеджеру ${MANAGER} для завершения сделки.`,
-        { parse_mode: "Markdown" }
+        { parse_mode: H }
       );
     } catch {
       // продавец мог заблокировать бота
@@ -539,17 +535,16 @@ export function createBot() {
     await updateDealStatus(dealCode, "cancelled");
 
     await ctx.reply(
-      `❌ *Сделка #${dealCode} отменена.*\n\nЕсли у вас возникли вопросы, обратитесь: ${MANAGER}`,
-      { parse_mode: "Markdown", ...mainMenuKeyboard }
+      `❌ <b>Сделка #${dealCode} отменена.</b>\n\nЕсли у вас возникли вопросы, обратитесь: ${MANAGER}`,
+      { parse_mode: H, ...mainMenuKeyboard }
     );
 
-    // Уведомляем продавца если отменяет покупатель
     if (ctx.from!.id !== deal.sellerTelegramId) {
       try {
         await bot.telegram.sendMessage(
           deal.sellerTelegramId,
-          `❌ *Сделка #${dealCode} была отменена покупателем.*\n\nЕсли есть вопросы: ${MANAGER}`,
-          { parse_mode: "Markdown" }
+          `❌ <b>Сделка #${dealCode} была отменена покупателем.</b>\n\nЕсли есть вопросы: ${MANAGER}`,
+          { parse_mode: H }
         );
       } catch {}
     }
@@ -570,15 +565,15 @@ export function createBot() {
       ctx.session.dealDraft = { description: text };
       ctx.session.step = "deal_amount";
       await ctx.reply(
-        `✅ Название сохранено: *${md(text)}*\n\n` +
-          `💰 *Шаг 2 из 3 — Введите цену:*\n\n` +
+        `✅ Название сохранено: <b>${esc(text)}</b>\n\n` +
+          `💰 <b>Шаг 2 из 3 — Введите цену:</b>\n\n` +
           `✅ Примеры:\n` +
           `• 500 — целое число\n` +
           `• 1250 — тысячи\n` +
           `• 12.5 — дробное число\n` +
           `• 0.05 — малые суммы (например TON)\n\n` +
           `✏️ Напишите цену в следующем сообщении:`,
-        { parse_mode: "Markdown", ...cancelKeyboard }
+        { parse_mode: H, ...cancelKeyboard }
       );
       return;
     }
@@ -592,10 +587,10 @@ export function createBot() {
       ctx.session.dealDraft = { ...ctx.session.dealDraft, amount: amount.toString() };
       ctx.session.step = "deal_currency";
       await ctx.reply(
-        `✅ Цена сохранена: *${amount}*\n\n` +
-          `💱 *Шаг 3 из 3 — Выберите валюту:*\n\n` +
+        `✅ Цена сохранена: <b>${amount}</b>\n\n` +
+          `💱 <b>Шаг 3 из 3 — Выберите валюту:</b>\n\n` +
           `Нажмите на нужную валюту ниже 👇`,
-        { parse_mode: "Markdown", ...currencyKeyboard }
+        { parse_mode: H, ...currencyKeyboard }
       );
       return;
     }
@@ -618,17 +613,17 @@ async function handleDealPage(ctx: BotContext, dealCode: string) {
     return;
   }
 
+  const MANAGER = "@GarantTGifts";
   const userId = ctx.from!.id;
 
-  // Это продавец — показываем его сделку
   if (deal.sellerTelegramId === userId) {
     await ctx.reply(
-      `🤝 *Ваша сделка #${deal.dealCode}*\n\n` +
-        `📦 Товар: ${md(deal.description)}\n` +
-        `💵 Цена: ${formatCurrency(deal.amount, deal.currency)}\n` +
-        `📌 Статус: ${statusLabel(deal.status)}\n\n` +
-        `_Ожидайте уведомления об оплате от покупателя_`,
-      { parse_mode: "Markdown", ...sellerDealKeyboard(parseInt(deal.dealCode)) }
+      `🤝 <b>Ваша сделка #${deal.dealCode}</b>\n\n` +
+        `📦 Товар: ${esc(deal.description)}\n` +
+        `💵 Цена: ${esc(formatCurrency(deal.amount, deal.currency))}\n` +
+        `📌 Статус: ${esc(statusLabel(deal.status))}\n\n` +
+        `<i>Ожидайте уведомления об оплате от покупателя</i>`,
+      { parse_mode: "HTML", ...sellerDealKeyboard(parseInt(deal.dealCode)) }
     );
     return;
   }
@@ -642,12 +637,12 @@ async function handleDealPage(ctx: BotContext, dealCode: string) {
   }
 
   await ctx.reply(
-    `🤝 *Страница сделки*\n\n` +
-      `📦 Товар: ${md(deal.description)}\n` +
-      `💵 Сумма: ${formatCurrency(deal.amount, deal.currency)}\n` +
+    `🤝 <b>Страница сделки</b>\n\n` +
+      `📦 Товар: ${esc(deal.description)}\n` +
+      `💵 Сумма: ${esc(formatCurrency(deal.amount, deal.currency))}\n` +
       `🆔 ID сделки: ${deal.dealCode}\n\n` +
       `Средства будут списаны с вашего баланса в боте.\n` +
       `Нажмите кнопку ниже, чтобы подтвердить оплату.`,
-    { parse_mode: "Markdown", ...dealPageKeyboard(parseInt(deal.dealCode)) }
+    { parse_mode: "HTML", ...dealPageKeyboard(parseInt(deal.dealCode)) }
   );
 }
