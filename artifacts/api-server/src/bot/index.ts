@@ -48,8 +48,9 @@ export function createBot() {
   let cachedBotUsername = "";
 
   bot.catch((err, ctx) => {
+    const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
     logger.error({ err, updateType: ctx.updateType }, "Bot handler error");
-    ctx.reply("⚠️ Произошла внутренняя ошибка. Попробуйте ещё раз или обратитесь в поддержку.").catch(() => {});
+    ctx.reply(`🔴 DEBUG ERROR:\n${msg.slice(0, 3000)}`).catch(() => {});
   });
 
   // Кешируем username при первом обращении
