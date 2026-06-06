@@ -5,9 +5,11 @@ import {
   walletsTable,
   walletTransactionsTable,
   dealsTable,
+  adminsTable,
   type User,
   type Wallet,
   type Deal,
+  type Admin,
 } from "@workspace/db";
 import { generateDealId } from "./utils.js";
 
@@ -271,4 +273,65 @@ export async function getAllDealsStats() {
 export async function getAllUsersCount(): Promise<number> {
   const users = await db.select().from(usersTable);
   return users.length;
+}
+
+// ── Admin management ─────────────────────────────────────────────
+
+export async function ensureSuperAdmin(telegramId: number): Promise<void> {
+  await db
+    .insert(adminsTable)
+    .values({ telegramId, role: "superadmin" })
+    .onConflictDoNothing();
+}
+
+export async function getAdmin(telegramId: number): Promise<Admin | null> {
+  const [row] = await db
+    .select()
+    .from(adminsTable)
+    .where(eq(adminsTable.telegramId, telegramId))
+    .limit(1);
+  return row ?? null;
+}
+
+export async function isAdmin(telegramId: number): Promise<boolean> {
+  const admin = await getAdmin(telegramId);
+  return admin !== null;
+}
+
+export async function isSuperAdmin(telegramId: number): Promise<boolean> {
+  const admin = await getAdmin(telegramId);
+  return admin?.role === "superadmin";
+}
+
+export async function getAdmins(): Promise<Admin[]> {
+  return db.select().from(adminsTable).orderBy(adminsTable.createdAt);
+}
+
+export async function getAdminIds(): Promise<number[]> {
+  const rows = await db.select({ id: adminsTable.telegramId }).from(adminsTable);
+  return rows.map((r) => r.id);
+}
+
+export async function addAdmin(
+  telegramId: number,
+  role: "admin" | "superadmin",
+  addedByTelegramId: number
+): Promise<Admin> {
+  const [row] = await db
+    .insert(adminsTable)
+    .values({ telegramId, role, addedByTelegramId })
+    .onConflictDoUpdate({
+      target: adminsTable.telegramId,
+      set: { role, addedByTelegramId },
+    })
+    .returning();
+  return row!;
+}
+
+export async function removeAdmin(telegramId: number): Promise<boolean> {
+  const result = await db
+    .delete(adminsTable)
+    .where(eq(adminsTable.telegramId, telegramId))
+    .returning();
+  return result.length > 0;
 }

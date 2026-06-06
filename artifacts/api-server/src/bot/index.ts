@@ -21,6 +21,13 @@ import {
   getOpenDeals,
   getAllDealsStats,
   getAllUsersCount,
+  ensureSuperAdmin,
+  isAdmin,
+  isSuperAdmin,
+  getAdmins,
+  getAdminIds,
+  addAdmin,
+  removeAdmin,
 } from "./db.js";
 import {
   formatCurrency,
@@ -48,9 +55,22 @@ export function createBot() {
 
   let cachedBotUsername = "";
 
+  // ── Инициализация суперадмина ────────────────────────────────
+  const superAdminId = process.env["SUPER_ADMIN_ID"]
+    ? parseInt(process.env["SUPER_ADMIN_ID"])
+    : null;
+  if (superAdminId && !isNaN(superAdminId)) {
+    ensureSuperAdmin(superAdminId).catch((err) =>
+      logger.error({ err }, "Failed to ensure super admin")
+    );
+  }
+
+  // ── Глобальный перехватчик ошибок ────────────────────────────
   bot.catch((err, ctx) => {
     logger.error({ err, updateType: ctx.updateType }, "Bot handler error");
-    ctx.reply("⚠️ Произошла внутренняя ошибка. Попробуйте ещё раз или обратитесь в поддержку.").catch(() => {});
+    ctx
+      .reply("⚠️ Произошла внутренняя ошибка. Попробуйте ещё раз или обратитесь в поддержку.")
+      .catch(() => {});
   });
 
   async function getBotUsername(): Promise<string> {
@@ -58,6 +78,16 @@ export function createBot() {
     const info = await bot.telegram.getMe();
     cachedBotUsername = info.username ?? "";
     return cachedBotUsername;
+  }
+
+  // Отправляет уведомление всем админам
+  async function notifyAdmins(text: string): Promise<void> {
+    const adminIds = await getAdminIds();
+    await Promise.allSettled(
+      adminIds.map((id) =>
+        bot.telegram.sendMessage(id, text, { parse_mode: H })
+      )
+    );
   }
 
   // ──────────────────────────────────────────
@@ -99,10 +129,18 @@ export function createBot() {
   // /add <telegramId> <amount> <currency>
   // ──────────────────────────────────────────
   bot.command("add", async (ctx) => {
+    if (!(await isAdmin(ctx.from.id))) {
+      await ctx.reply("❌ Нет доступа.");
+      return;
+    }
+
     const text = ctx.message.text.trim();
     const parts = text.split(/\s+/);
     if (parts.length !== 4) {
-      await ctx.reply("❌ Формат: /add &lt;ID&gt; &lt;сумма&gt; &lt;валюта&gt;\nПример: /add 123456789 1250 Руб", { parse_mode: H });
+      await ctx.reply(
+        "❌ Формат: /add &lt;ID&gt; &lt;сумма&gt; &lt;валюта&gt;\nПример: /add 123456789 1250 Руб",
+        { parse_mode: H }
+      );
       return;
     }
 
@@ -119,14 +157,20 @@ export function createBot() {
     if (rawCurrency === "грн" || rawCurrency === "uah") currency = "UAH";
     else if (rawCurrency === "руб" || rawCurrency === "rub") currency = "RUB";
     else if (rawCurrency === "ton") currency = "TON";
-    else if (rawCurrency === "stars" || rawCurrency === "звёзды" || rawCurrency === "звезды") currency = "STARS";
+    else if (rawCurrency === "stars" || rawCurrency === "звёзды" || rawCurrency === "звезды")
+      currency = "STARS";
     else {
       await ctx.reply("❌ Неизвестная валюта. Допустимые: Грн, Руб, TON, Stars");
       return;
     }
 
     await upsertUser(targetId, {});
-    await addToWallet(targetId, currency, amount, `Пополнение администратором (от ${ctx.from.id})`);
+    await addToWallet(
+      targetId,
+      currency,
+      amount,
+      `Пополнение администратором (от ${ctx.from.id})`
+    );
     const wallet = await getWallet(targetId);
 
     await ctx.reply(
@@ -160,14 +204,25 @@ export function createBot() {
   // /admin — панель администратора
   // ──────────────────────────────────────────
   bot.command("admin", async (ctx) => {
+    if (!(await isAdmin(ctx.from.id))) {
+      await ctx.reply("❌ Нет доступа.");
+      return;
+    }
+    await sendAdminPanel(ctx);
+  });
+
+  async function sendAdminPanel(ctx: BotContext) {
+    const superAdmin = await isSuperAdmin(ctx.from!.id);
     const [deals, stats, usersCount] = await Promise.all([
       getOpenDeals(),
       getAllDealsStats(),
       getAllUsersCount(),
     ]);
 
+    const roleLabel = superAdmin ? "⭐ Суперадмин" : "🔑 Админ";
+
     const header =
-      `🛠 <b>Панель администратора</b>\n\n` +
+      `🛠 <b>Панель администратора</b> — ${roleLabel}\n\n` +
       `👥 Пользователей: <b>${usersCount}</b>\n\n` +
       `📊 <b>Статистика сделок:</b>\n` +
       `▪️ Всего: ${stats.total}\n` +
@@ -179,7 +234,13 @@ export function createBot() {
       `🔓 <b>Открытые сделки (${deals.length}):</b>`;
 
     if (deals.length === 0) {
-      await ctx.reply(header + "\n\n<i>Нет открытых сделок</i>", {
+      const extra = superAdmin
+        ? `\n\n<b>Управление админами:</b>\n` +
+          `/addadmin &lt;telegram_id&gt; — добавить админа\n` +
+          `/removeadmin &lt;telegram_id&gt; — удалить админа\n` +
+          `/admins — список всех админов`
+        : "";
+      await ctx.reply(header + "\n\n<i>Нет открытых сделок</i>" + extra, {
         parse_mode: H,
         ...mainMenuKeyboard,
       });
@@ -215,10 +276,159 @@ export function createBot() {
     if (deals.length > 20) {
       await ctx.reply(`<i>...и ещё ${deals.length - 20} сделок</i>`, { parse_mode: H });
     }
+
+    if (superAdmin) {
+      await ctx.reply(
+        `👥 <b>Управление админами:</b>\n` +
+          `/addadmin &lt;telegram_id&gt; — добавить обычного админа\n` +
+          `/addadmin &lt;telegram_id&gt; superadmin — добавить суперадмина\n` +
+          `/removeadmin &lt;telegram_id&gt; — удалить админа\n` +
+          `/admins — список всех админов`,
+        { parse_mode: H }
+      );
+    }
+  }
+
+  // ──────────────────────────────────────────
+  // /admins — список всех администраторов
+  // ──────────────────────────────────────────
+  bot.command("admins", async (ctx) => {
+    if (!(await isAdmin(ctx.from.id))) {
+      await ctx.reply("❌ Нет доступа.");
+      return;
+    }
+
+    const admins = await getAdmins();
+    if (admins.length === 0) {
+      await ctx.reply("👥 Список администраторов пуст.");
+      return;
+    }
+
+    const lines = admins.map((a, i) => {
+      const roleIcon = a.role === "superadmin" ? "⭐" : "🔑";
+      const addedBy = a.addedByTelegramId ? ` (добавлен: <code>${a.addedByTelegramId}</code>)` : "";
+      return `${i + 1}. ${roleIcon} <code>${a.telegramId}</code>${addedBy}`;
+    });
+
+    await ctx.reply(
+      `👥 <b>Администраторы бота (${admins.length}):</b>\n\n` + lines.join("\n"),
+      { parse_mode: H }
+    );
   });
 
+  // ──────────────────────────────────────────
+  // /addadmin <telegram_id> [admin|superadmin]
+  // ──────────────────────────────────────────
+  bot.command("addadmin", async (ctx) => {
+    if (!(await isSuperAdmin(ctx.from.id))) {
+      await ctx.reply("❌ Только суперадмин может добавлять администраторов.");
+      return;
+    }
+
+    const parts = ctx.message.text.trim().split(/\s+/);
+    if (parts.length < 2) {
+      await ctx.reply(
+        "❌ Формат: /addadmin &lt;telegram_id&gt; [admin|superadmin]\nПример: /addadmin 123456789",
+        { parse_mode: H }
+      );
+      return;
+    }
+
+    const targetId = parseInt(parts[1]!);
+    if (isNaN(targetId)) {
+      await ctx.reply("❌ Некорректный Telegram ID.");
+      return;
+    }
+
+    const roleRaw = parts[2]?.toLowerCase();
+    const role: "admin" | "superadmin" =
+      roleRaw === "superadmin" ? "superadmin" : "admin";
+
+    if (targetId === ctx.from.id && role !== "superadmin") {
+      await ctx.reply("ℹ️ Вы уже являетесь суперадмином.");
+      return;
+    }
+
+    await addAdmin(targetId, role, ctx.from.id);
+    const roleLabel = role === "superadmin" ? "⭐ Суперадмин" : "🔑 Админ";
+
+    await ctx.reply(
+      `✅ Пользователь <code>${targetId}</code> добавлен как ${roleLabel}.`,
+      { parse_mode: H }
+    );
+
+    try {
+      await bot.telegram.sendMessage(
+        targetId,
+        `🎉 <b>Вам выданы права администратора!</b>\n\nРоль: ${roleLabel}\n\nИспользуйте /admin для доступа к панели управления.`,
+        { parse_mode: H }
+      );
+    } catch {
+      // пользователь мог не запустить бота
+    }
+  });
+
+  // ──────────────────────────────────────────
+  // /removeadmin <telegram_id>
+  // ──────────────────────────────────────────
+  bot.command("removeadmin", async (ctx) => {
+    if (!(await isSuperAdmin(ctx.from.id))) {
+      await ctx.reply("❌ Только суперадмин может удалять администраторов.");
+      return;
+    }
+
+    const parts = ctx.message.text.trim().split(/\s+/);
+    if (parts.length < 2) {
+      await ctx.reply(
+        "❌ Формат: /removeadmin &lt;telegram_id&gt;\nПример: /removeadmin 123456789",
+        { parse_mode: H }
+      );
+      return;
+    }
+
+    const targetId = parseInt(parts[1]!);
+    if (isNaN(targetId)) {
+      await ctx.reply("❌ Некорректный Telegram ID.");
+      return;
+    }
+
+    if (targetId === ctx.from.id) {
+      await ctx.reply("❌ Нельзя удалить самого себя из списка администраторов.");
+      return;
+    }
+
+    const removed = await removeAdmin(targetId);
+    if (!removed) {
+      await ctx.reply(`❌ Пользователь <code>${targetId}</code> не найден в списке админов.`, {
+        parse_mode: H,
+      });
+      return;
+    }
+
+    await ctx.reply(
+      `✅ Пользователь <code>${targetId}</code> удалён из администраторов.`,
+      { parse_mode: H }
+    );
+
+    try {
+      await bot.telegram.sendMessage(
+        targetId,
+        `⚠️ Ваши права администратора были отозваны.`,
+        { parse_mode: H }
+      );
+    } catch {
+      // пользователь мог заблокировать бота
+    }
+  });
+
+  // ──────────────────────────────────────────
   // Admin: завершить сделку принудительно
+  // ──────────────────────────────────────────
   bot.action(/^admin_complete_(\d+)$/, async (ctx) => {
+    if (!(await isAdmin(ctx.from!.id))) {
+      await ctx.answerCbQuery("❌ Нет доступа");
+      return;
+    }
     const dealCode = ctx.match[1]!;
     await ctx.answerCbQuery("✅ Сделка завершена");
     const deal = await getDealByCode(dealCode);
@@ -243,8 +453,14 @@ export function createBot() {
     }
   });
 
+  // ──────────────────────────────────────────
   // Admin: отменить сделку принудительно
+  // ──────────────────────────────────────────
   bot.action(/^admin_cancel_(\d+)$/, async (ctx) => {
+    if (!(await isAdmin(ctx.from!.id))) {
+      await ctx.answerCbQuery("❌ Нет доступа");
+      return;
+    }
     const dealCode = ctx.match[1]!;
     await ctx.answerCbQuery("❌ Сделка отменена");
     const deal = await getDealByCode(dealCode);
@@ -449,6 +665,15 @@ export function createBot() {
         `⏳ Ссылка активна до момента оплаты.`,
       { parse_mode: H, ...mainMenuKeyboard }
     );
+
+    // Уведомляем всех админов о новой сделке
+    await notifyAdmins(
+      `📝 <b>Новая сделка создана!</b>\n\n` +
+        `🆔 #${deal.dealCode}\n` +
+        `📦 ${esc(deal.description)}\n` +
+        `💵 ${esc(formatCurrency(deal.amount, deal.currency))}\n` +
+        `👤 Продавец: <code>${ctx.from.id}</code>`
+    );
   });
 
   // ──────────────────────────────────────────
@@ -501,6 +726,7 @@ export function createBot() {
       { parse_mode: H, ...mainMenuKeyboard }
     );
 
+    // Уведомляем продавца
     try {
       await bot.telegram.sendMessage(
         deal.sellerTelegramId,
@@ -513,6 +739,17 @@ export function createBot() {
     } catch {
       // продавец мог заблокировать бота
     }
+
+    // Уведомляем всех админов об оплате
+    await notifyAdmins(
+      `💰 <b>Сделка оплачена!</b>\n\n` +
+        `🆔 #${deal.dealCode}\n` +
+        `📦 ${esc(deal.description)}\n` +
+        `💵 ${esc(formatCurrency(deal.amount, deal.currency))}\n` +
+        `👤 Продавец: <code>${deal.sellerTelegramId}</code>\n` +
+        `🛒 Покупатель: <code>${ctx.from!.id}</code>\n\n` +
+        `⚡ Требуется передача товара через ${MANAGER}`
+    );
   });
 
   // ──────────────────────────────────────────
@@ -607,13 +844,19 @@ export function createBot() {
 // Страница сделки для покупателя
 // ──────────────────────────────────────────
 async function handleDealPage(ctx: BotContext, dealCode: string) {
+  const { mainMenuKeyboard, dealPageKeyboard, sellerDealKeyboard } = await import(
+    "./keyboards.js"
+  );
+  const { getDealByCode } = await import("./db.js");
+  const { formatCurrency, statusLabel, esc } = await import("./utils.js");
+
+  const MANAGER = "@GarantTGifts";
   const deal = await getDealByCode(dealCode);
   if (!deal) {
     await ctx.reply("❌ Сделка не найдена. Проверьте ссылку.", mainMenuKeyboard);
     return;
   }
 
-  const MANAGER = "@GarantTGifts";
   const userId = ctx.from!.id;
 
   if (deal.sellerTelegramId === userId) {
