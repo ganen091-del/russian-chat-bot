@@ -200,10 +200,7 @@ export function createBot() {
   // ──────────────────────────────────────────
   // /admin — панель администратора
   // ──────────────────────────────────────────
-  bot.command("admin", async (ctx) => {
-    if (!(await isAdmin(ctx.from.id))) {
-      await ctx.reply("❌ Нет доступа.");
-      return;
+  bo
     }
     await sendAdminPanel(ctx);
   });
@@ -455,9 +452,6 @@ export function createBot() {
   // ──────────────────────────────────────────
   bot.action(/^admin_cancel_(\d+)$/, async (ctx) => {
     if (!(await isAdmin(ctx.from!.id))) {
-      await ctx.answerCbQuery("❌ Нет доступа");
-      return;
-    }
     const dealCode = ctx.match[1]!;
     await ctx.answerCbQuery("❌ Сделка отменена");
     const deal = await getDealByCode(dealCode);
