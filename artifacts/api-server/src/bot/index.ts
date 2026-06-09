@@ -286,11 +286,6 @@ export function createBot() {
   // ──────────────────────────────────────────
   // /admins — список всех администраторов
   // ──────────────────────────────────────────
-  bot.command("admins", async (ctx) => {
-    if (!(await isAdmin(ctx.from.id))) {
-      await ctx.reply("❌ Нет доступа.");
-      return;
-    }
 
     const admins = await getAdmins();
     if (admins.length === 0) {
