@@ -1,4 +1,4 @@
-import { Telegraf, session } from "telegraf";
+console.log("БОТ ЗАПУЩЕН. Токен:", process.env.BOT_TOKEN ? "НАЙДЕН" : "НЕ НАЙДЕН");  import { Telegraf, session } from "telegraf";
 import type { Context } from "telegraf";
 import type { SessionData } from "./session.js";
 import { logger } from "../lib/logger.js";
