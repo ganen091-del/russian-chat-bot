@@ -128,10 +128,7 @@ export function createBot() {
   // ──────────────────────────────────────────
   // /add <telegramId> <amount> <currency>
   // ──────────────────────────────────────────
-  bot.command("add", async (ctx) => {
-    if (!(await isAdmin(ctx.from.id))) {
-      await ctx.reply("❌ Нет доступа.");
-      return;
+  
     }
 
     const text = ctx.message.text.trim();
